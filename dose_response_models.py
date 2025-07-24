@@ -29,12 +29,12 @@ class DoseResponseModel(ABC):
     @property
     @abstractmethod
     def _name(self) -> str:
-        """Require a model name for derived classes."""
+        """Require model name for derived classes."""
 
     @property
     @abstractmethod
     def _fit_log_x(self) -> bool:
-        """Require a flag to fit raw or log x for derived classes."""
+        """Require flag to fit raw or log x for derived classes."""
 
     @abstractmethod
     def _model_fn(
@@ -42,7 +42,7 @@ class DoseResponseModel(ABC):
         tx: ArrayLike,
         *args
     ) -> ArrayLike:
-        """Require a model curve-fitting function for derived classes."""
+        """Require model curve-fitting function for derived classes."""
 
     class ParamGuess(NamedTuple):
         """Named tuple representing an initial param guess and bounds."""
@@ -80,7 +80,7 @@ class DoseResponseModel(ABC):
             y: response data
             loss_fn: loss function
         Returns:
-            model loss
+            objective function value
         """
         return -loss_fn(
             y,
@@ -124,7 +124,7 @@ class DoseResponseModel(ABC):
         if fit.success:
             self.best_params_ = fit.x
             self.log_likelihood_ = -fit.fun
-            self.aic_ = 2 * len(self.best_params_) - 2 * self.log_likelihood_
+            self.aic_ = 2 * (len(self.best_params_) - self.log_likelihood_)
 
         return self # Permit chaining with predict()
 
