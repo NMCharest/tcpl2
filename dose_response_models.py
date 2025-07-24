@@ -1,10 +1,8 @@
 """Library of classes representing various dose-response models.
 
-Dose-response models are used in curve-fitting.
-
 Classes:
     DoseResponseModel: abstract base class for models
-    HillModel: Hill model ~ f(x) = tp / (1 + (ga / x) ^ p)
+    LogHillModel: Log Hill model ~ f(x) = tp / (1 + 10 ^ (p * (ga - x)))
 """
 
 from abc import ABC, abstractmethod
@@ -20,8 +18,8 @@ from loss_functions import LossFunctions
 class DoseResponseModel(ABC):
     """Abstract base class defining dose-response model behavior."""
 
-    def __init__(self, loss_fn: LossFunctions):
-        self.loss_fn = loss_fn
+    def __init__(self):
+        # Initialize various output parameters
         self.success_ = False
         self.log_likelihood_ = None
         self.aic_ = None
@@ -31,25 +29,17 @@ class DoseResponseModel(ABC):
     @property
     @abstractmethod
     def _name(self) -> str:
-        """Require a defined private model name for derived classes."""
+        """Require a model name for derived classes."""
 
     @property
     @abstractmethod
-    def _fit_log_conc(self) -> bool:
-        """Require a private flag for raw or log conc for derived classes."""
-
-    def _transform_conc(self, conc: ArrayLike) -> ArrayLike:
-        """Calculate log conc if model is set to fit in log space."""
-        return conc if not self._fit_log_conc else np.log10(conc)
-
-    def _transform_err(self, err: float) -> float:
-        """Calculate log err if model is set to fit in log space."""
-        return err if not self._fit_log_conc else np.exp(err)
+    def _fit_log_x(self) -> bool:
+        """Require a flag to fit raw or log x for derived classes."""
 
     @abstractmethod
-    def _fit_fn(
+    def _model_fn(
         self,
-        tconc: ArrayLike,
+        tx: ArrayLike,
         *args
     ) -> ArrayLike:
         """Require a model curve-fitting function for derived classes."""
@@ -60,63 +50,126 @@ class DoseResponseModel(ABC):
         bounds: list[tuple[float, float]]
 
     @abstractmethod
-    def _param_guess(
+    def _parameterize_initial(
         self,
-        tconc: ArrayLike,
-        resp: ArrayLike
+        tx: ArrayLike,
+        y: ArrayLike
     ) -> ParamGuess:
-        """Require a _guess method for initial params for derived classes."""
+        """Require method to guess initial conditions for derived classes."""
 
-    def _loss(self, params, tconc, resp):
-        *core_params, err = params
-        pred = self._fit_fn(tconc, *core_params)
-        return -self.loss_fn(resp, pred, self._transform_err(err))
+    def _transform_x(self, x: ArrayLike) -> ArrayLike:
+        """Calculate log x if model is fitted in log space."""
+        return x if not self._fit_log_x else np.log10(x)
 
-    def fit(self, conc, resp):
-        tconc = self._transform_conc(conc)
-        ic = self._param_guess(tconc, resp)
+    def _transform_err(self, err: float) -> float:
+        """Calculate exp err if model is fitted in log space."""
+        return err if not self._fit_log_x else np.exp(err)
+
+    def _obj_fn(
+        self,
+        params: ArrayLike,
+        tx: ArrayLike,
+        y: ArrayLike,
+        loss_fn: LossFunctions
+    ) -> float:
+        """Compute the objective function used to optimize model fitting.
+        
+        Args:
+            params: model parameters, including error term
+            tx: transformed dose data
+            y: response data
+            loss_fn: loss function
+        Returns:
+            model loss
+        """
+        return -loss_fn(
+            y,
+            self._model_fn(tx, *params[:-1]),
+            self._transform_err(params[-1])
+        )
+
+    def fit(
+        self,
+        x: ArrayLike,
+        y: ArrayLike,
+        loss_fn: LossFunctions = LossFunctions.DT4
+    ):
+        """Fit the model function to the provided dose-response data.
+        
+        Args:
+            x: untransformed dose data
+            y: response data
+            loss_fn: loss function (defaults to dt4)
+        Returns:
+            fitted model object
+        """
+
+        # Perform log transformation of data if needed
+        tx = self._transform_x(x)
+        # Guess initial conditions and bounds
+        ic = self._parameterize_initial(tx, y)
+
+        # Perform optimization
         fit = minimize(
-            fun=self._loss,
+            fun=self._obj_fn,
             x0=ic.guess,
-            args=(tconc, resp),
+            args=(tx, y, loss_fn),
             bounds=ic.bounds,
             method='L-BFGS-B'
         )
 
+        # Extract the fit information
         self.best_fit_ = fit
         self.success_ = fit.success
         if fit.success:
             self.best_params_ = fit.x
-            *core_params, err = self.best_params_
-            terr = self._transform_err(err)
-            pred = self._fit_fn(tconc, *core_params)
-            self.log_likelihood_ = self.loss_fn(resp, pred, terr)
+            self.log_likelihood_ = -fit.fun
             self.aic_ = 2 * len(self.best_params_) - 2 * self.log_likelihood_
 
-    def predict(self, conc):
+        return self # Permit chaining with predict()
+
+    def predict(
+        self,
+        x: ArrayLike
+    ) -> ArrayLike:
+        """Use fitted model to perform prediction for new dose data.
+        
+        Args:
+            x: new untransformed dose data
+        Returns:
+            fitted model predictions
+        """
         if not self.success_:
             raise ValueError('Model not fit.')
+        return self._model_fn(self._transform_x(x), *self.best_params_[:-1])
 
-        return self._fit_fn(
-            self._transform_conc(conc), *self.best_params_[:-1])
+    def fit_predict(
+        self,
+        x: ArrayLike,
+        y: ArrayLike,
+        loss_fn: LossFunctions
+    ) -> ArrayLike:
+        """Fit the model then predict from the same data."""
+        return self.fit(x, y, loss_fn).predict(x)
 
 
-class HillModel(DoseResponseModel):
+class LogHillModel(DoseResponseModel):
+    """Hill model fitting function in log space."""
 
-    _name = 'hill'
-    _fit_log_conc = True
+    _name = 'loghill'
+    _fit_log_x = True
 
-    def _fit_fn(self, tconc, *args):
-        return args[0] / (1 + 10 ** (args[2] * (args[1] - tconc)))
+    def _model_fn(self, tx, *args):
+        return args[0] / (1 + 10 ** (args[2] * (args[1] - tx)))
 
-    def _param_guess(self, tconc, resp):
-        tp0 = np.max(resp)
-        ga0 = np.median(tconc)
+    def _parameterize_initial(self, tx, y):
+        tp0 = np.max(y)
+        ga0 = np.median(tx)
         p0 = 1.0
-        log_err0 = np.log(np.std(resp) + 1e-6)
+        log_err0 = np.log(np.std(y) + 1e-6)
         guess = [tp0, ga0, p0, log_err0]
         bounds = [
-            (0, np.max(resp)), # tp
+            (0, np.max(y)), # tp
             (-3, 3), # ga
             (0.1, 10), # p
             (-20, 5), # log_err

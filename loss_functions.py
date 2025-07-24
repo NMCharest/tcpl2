@@ -21,10 +21,12 @@ class LossFunctions(Enum):
         pdf: Callable[..., ArrayLike],
         **kwargs
     ) -> Callable[[ArrayLike, ArrayLike, ArrayLike], float]:
-        """Generic log loss error function based on input PDF function."""
+        """Generic log loss function using any input log PDF function."""
         return lambda o, p, e: np.sum(pdf((o - p) /  e, **kwargs) - np.log(e))
 
+    # t-distributed log error with 4 DoF
     DT4 = member(staticmethod(_loss_fn(t.logpdf, df=4)))
+    # Normally distributed log error
     DNORM = member(staticmethod(_loss_fn(norm.logpdf)))
 
     def __call__(
