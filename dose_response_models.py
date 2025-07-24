@@ -9,8 +9,10 @@ from abc import ABC, abstractmethod
 from typing import NamedTuple
 
 import numpy as np
+import pandas as pd
 from numpy.typing import ArrayLike
 from scipy.optimize import minimize
+from scipy.stats import median_abs_deviation
 
 from loss_functions import LossFunctions
 
@@ -26,15 +28,17 @@ class DoseResponseModel(ABC):
         self.best_fit_ = None
         self.best_params_ = None
 
+    DEFAULT_LOSS_FN = LossFunctions.DT4
+
     @property
     @abstractmethod
     def _name(self) -> str:
-        """Require a model name for derived classes."""
+        """Require model name for derived classes."""
 
     @property
     @abstractmethod
     def _fit_log_x(self) -> bool:
-        """Require a flag to fit raw or log x for derived classes."""
+        """Require flag to fit raw or log x for derived classes."""
 
     @abstractmethod
     def _model_fn(
@@ -42,7 +46,7 @@ class DoseResponseModel(ABC):
         tx: ArrayLike,
         *args
     ) -> ArrayLike:
-        """Require a model curve-fitting function for derived classes."""
+        """Require model curve-fitting function for derived classes."""
 
     class ParamGuess(NamedTuple):
         """Named tuple representing an initial param guess and bounds."""
@@ -53,7 +57,8 @@ class DoseResponseModel(ABC):
     def _parameterize_initial(
         self,
         tx: ArrayLike,
-        y: ArrayLike
+        y: ArrayLike,
+        bid: bool
     ) -> ParamGuess:
         """Require method to guess initial conditions for derived classes."""
 
@@ -80,7 +85,7 @@ class DoseResponseModel(ABC):
             y: response data
             loss_fn: loss function
         Returns:
-            model loss
+            objective function value
         """
         return -loss_fn(
             y,
@@ -92,14 +97,16 @@ class DoseResponseModel(ABC):
         self,
         x: ArrayLike,
         y: ArrayLike,
-        loss_fn: LossFunctions = LossFunctions.DT4
+        loss_fn: LossFunctions = DEFAULT_LOSS_FN,
+        bid: bool = True
     ):
         """Fit the model function to the provided dose-response data.
         
         Args:
             x: untransformed dose data
             y: response data
-            loss_fn: loss function (defaults to dt4)
+            loss_fn: loss function (defaults dt4)
+            bid: bidirectional fit (default true)
         Returns:
             fitted model object
         """
@@ -107,7 +114,7 @@ class DoseResponseModel(ABC):
         # Perform log transformation of data if needed
         tx = self._transform_x(x)
         # Guess initial conditions and bounds
-        ic = self._parameterize_initial(tx, y)
+        ic = self._parameterize_initial(tx, y, bid)
 
         # Perform optimization
         fit = minimize(
@@ -124,7 +131,7 @@ class DoseResponseModel(ABC):
         if fit.success:
             self.best_params_ = fit.x
             self.log_likelihood_ = -fit.fun
-            self.aic_ = 2 * len(self.best_params_) - 2 * self.log_likelihood_
+            self.aic_ = 2 * (len(self.best_params_) - self.log_likelihood_)
 
         return self # Permit chaining with predict()
 
@@ -147,14 +154,29 @@ class DoseResponseModel(ABC):
         self,
         x: ArrayLike,
         y: ArrayLike,
-        loss_fn: LossFunctions
+        loss_fn: LossFunctions = DEFAULT_LOSS_FN,
+        bid: bool = True
     ) -> ArrayLike:
-        """Fit the model then predict from the same data."""
-        return self.fit(x, y, loss_fn).predict(x)
+        """Fit the model then predict from the same data.
+
+        Args:
+            x: untransformed dose data
+            y: response data
+            loss_fn: loss function (default dt4)
+            bid: bidirectional fit (default true)
+        """
+        return self.fit(x, y, loss_fn, bid).predict(x)
 
 
 class LogHillModel(DoseResponseModel):
-    """Hill model fitting function in log space."""
+    """Hill model fitting function in log space.
+    
+    Parameters:
+        tp: theoretical maximal response (top)
+        ga: gain AC50
+        p: gain power
+        er: error term
+    """
 
     _name = 'loghill'
     _fit_log_x = True
@@ -162,17 +184,31 @@ class LogHillModel(DoseResponseModel):
     def _model_fn(self, tx, *args):
         return args[0] / (1 + 10 ** (args[2] * (args[1] - tx)))
 
-    def _parameterize_initial(self, tx, y):
-        tp0 = np.max(y)
-        ga0 = np.median(tx)
-        p0 = 1.0
-        log_err0 = np.log(np.std(y) + 1e-6)
-        guess = [tp0, ga0, p0, log_err0]
+    def _parameterize_initial(self, tx, y, bid):
+        # Calculate median response at each dose in case of multiple samples
+        meds = pd.DataFrame({'y': y, 'tx': tx}).groupby('tx')['y'].median()
+        # Initial parameter guesses
+        guess = [
+            abs(meds).max() if bid else meds.max(), # tp0
+            meds.idxmax() - 0.5, # ga0
+            1.2, # p0
+            (np.log(y_mad) if (y_mad := median_abs_deviation(y)) > 0
+                else np.log(1e-32)) # er0
+        ]
+
+        # Bounds for tp depend on whether fit is bidirectional
+        if bid:
+            tp_max = 1.2 * max([abs(min(y)), abs(max(y))])
+            tp_min = -tp_max
+        else:
+            tp_min = 0
+            tp_max = 1.2 * max(y)
+
         bounds = [
-            (0, np.max(y)), # tp
-            (-3, 3), # ga
-            (0.1, 10), # p
-            (-20, 5), # log_err
+            (tp_min, tp_max), # tp
+            (min(tx) - 1, max(tx) + 0.5), # ga
+            (0.3, 8), # p
+            (-20, 5), # er
         ]
 
         return DoseResponseModel.ParamGuess(guess=guess, bounds=bounds)
