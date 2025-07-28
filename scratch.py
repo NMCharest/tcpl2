@@ -21,6 +21,7 @@ if model.success_:
     print(f'Log-likelihood: {model.log_likelihood_}')
     print(f'AIC: {model.aic_}')
     print(f'Predictions: {model.predict(conc)}')
+    print(f'Inversion of Midpoint: {model.invert(resp[int(len(resp)/2)])}')
 
     # Predict spaced data for plotting
     logc = np.log10(conc)

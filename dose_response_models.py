@@ -6,7 +6,7 @@ Classes:
 """
 
 from abc import ABC, abstractmethod
-from typing import NamedTuple
+from typing import NamedTuple, Optional
 
 import numpy as np
 import pandas as pd
@@ -166,6 +166,19 @@ class DoseResponseModel(ABC):
             bid: bidirectional fit (default true)
         """
         return self.fit(x, y, loss_fn, bid).predict(x)
+    
+    @abstractmethod
+    def invert(
+        self,
+        y: float,
+        gain_side: bool = True
+    ) -> Optional[float]:
+        """
+        Returns the concentration at which the model reaches activity level y.
+        If bidirectional, gain_side=True give ascending portion,
+        False five descending.
+        """
+        pass
 
 
 class LogHillModel(DoseResponseModel):
@@ -212,3 +225,16 @@ class LogHillModel(DoseResponseModel):
         ]
 
         return DoseResponseModel.ParamGuess(guess=guess, bounds=bounds)
+    
+    def invert(self, y: float, gain_side: bool = True) -> Optional[float]:
+        if not self.success_:
+            return None
+        tp, ga, p = self.best_params_[:-1]
+        if y <= 0 or y >= tp:
+            return None
+        try:
+            logc = ga - np.log10(tp / y - 1) / p
+            return 10 ** logc 
+        except:
+            return None
+
