@@ -3,17 +3,18 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-from dose_response_models import LogHillModel
-# from loss_functions import LossFunctions
+from dose_response_models import LogHillModel, Poly1Model, PowModel
 
 # Mock data
 conc = np.array([0.03, 0.1, 0.3, 1.0, 3.0, 10.0, 30.0, 100.0])
-resp = np.array([0, 0, 0.1, 0.2, 0.5, 1.0, 1.5, 2.0])
+hill_resp = np.array([0, 0, .1, .2, .5, 1, 1.5, 2])
+poly1_resp = np.array([0, .01, .1, .1, .2, .5, 2, 5])
+pow_resp = np.array([0, .01, .1, .1, .2, .5, 2, 8])
 bmr = 0.25
 
 # Initialize and fit the model
-model = LogHillModel()
-model.fit(conc, resp, bid=False)
+model = PowModel()
+model.fit(conc, pow_resp)
 
 if model.success_:
     # Output results
@@ -33,7 +34,7 @@ if model.success_:
 
     # Generate plot
     fig, ax = plt.subplots()
-    ax.scatter(conc, resp, label='Observed', color='black')
+    ax.scatter(conc, pow_resp, label='Observed', color='black')
     ax.plot(conc_fine, pred, label='Fit', color='blue')
     # Add AC50 line
     ax.axvline(10 ** model.best_params_[1], linestyle='--', c='red')
