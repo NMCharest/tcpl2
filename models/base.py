@@ -20,12 +20,13 @@ from scipy.stats import median_abs_deviation, norm, t
 # Default error (1e-32 or 1e-16)
 DEFAULT_ERROR = 1e-32
 
+
 class LossFunctions(Enum):
     """Callable enum of available loss functions."""
 
     @nonmember
     @staticmethod
-    def _base(o, p, e, pdf, **kwargs):
+    def _loss_eqn(o, p, e, pdf, **kwargs):
         if not e or e <= 0:
             e = DEFAULT_ERROR
         return np.sum(pdf((o - p) /  e, **kwargs) - np.log(e))
@@ -37,7 +38,7 @@ class LossFunctions(Enum):
         **kwargs
     ) -> Callable[[ArrayLike, ArrayLike, ArrayLike], float]:
         """Generic log loss function using any input log PDF function."""
-        return lambda o, p, e: LossFunctions._base(o, p, e, pdf, **kwargs)
+        return lambda o, p, e: LossFunctions._loss_eqn(o, p, e, pdf, **kwargs)
 
     # t-distributed log error with 4 DoF
     DT4 = member(staticmethod(_loss_fn(t.logpdf, df=4)))
@@ -52,6 +53,7 @@ class LossFunctions(Enum):
     ) -> float:
         return self.value(obs, pred, err)
 
+
 # Default loss function (DT4 or DNORM)
 DEFAULT_LOSS_FN = LossFunctions.DT4
 # Default bidirectional fit
@@ -60,6 +62,7 @@ DEFAULT_BID = True
 DEFAULT_ERROR_BOUNDS = (-32, 32)
 # Default optimization solver
 DEFAULT_METHOD = 'Nelder-Mead'
+
 
 class DoseResponseModel(ABC):
     """Abstract base class defining dose-response model behavior."""

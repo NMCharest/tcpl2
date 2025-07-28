@@ -1,7 +1,7 @@
 """Library of dose-response model classes for polynomial models.
 
 Classes:
-    Poly1Model: Linear model ~ f(x) = a * x
+    LinearModel: Linear model ~ f(x) = a * x
 """
 
 from numpy.typing import ArrayLike
@@ -9,11 +9,11 @@ from numpy.typing import ArrayLike
 from .base import DoseResponseModel
 
 
-class Poly1Model(DoseResponseModel):
-    """Degree-1 polynomial (linear) model fitting function.
+class LinearModel(DoseResponseModel):
+    """Linear (polynomial degree 1) model fitting function.
     
     Parameters:
-        a: y-scale (slope)
+        a: slope (y-scale)
     """
 
     _name = 'poly1'
@@ -30,7 +30,7 @@ class Poly1Model(DoseResponseModel):
         y: ArrayLike,
         bid: bool
     ) -> tuple[float, float]:
-        val = 1e8 * abs(Poly1Model._max_slope(tx, y, bid))
+        val = 1e8 * abs(LinearModel._max_slope(tx, y, bid))
         return (-val, val) if bid else (0, val)
 
     _model_params = [DoseResponseModel._Param('a', _max_slope, _a_bounds_fn)]

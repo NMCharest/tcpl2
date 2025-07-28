@@ -1,7 +1,7 @@
 """Library of dose-response model classes for power models.
 
 Classes:
-    PowModel: Power model ~ f(x) = a * x ^ p
+    PowerModel: Power model ~ f(x) = a * x ^ p
 """
 
 from numpy.typing import ArrayLike
@@ -9,7 +9,7 @@ from numpy.typing import ArrayLike
 from .base import DoseResponseModel
 
 
-class PowModel(DoseResponseModel):
+class PowerModel(DoseResponseModel):
     """Power model fitting function.
     
     Parameters:
@@ -19,11 +19,6 @@ class PowModel(DoseResponseModel):
 
     _name = 'pow'
     _is_log_fit = False
-
-    @staticmethod
-    def _max_slope(tx: ArrayLike, y: ArrayLike, bid: bool) -> float:
-        meds = DoseResponseModel._meds(tx, y, bid)
-        return meds.max() / max(tx)
 
     @staticmethod
     def _a_bounds_fn(

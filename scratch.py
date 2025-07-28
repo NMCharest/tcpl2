@@ -4,8 +4,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 from models.hill import LogHillModel
-from models.poly import Poly1Model
-from models.pow import PowModel
+from models.poly import LinearModel
+from models.power import PowerModel
 
 # Mock data
 conc = np.array([0.03, 0.1, 0.3, 1.0, 3.0, 10.0, 30.0, 100.0])
@@ -14,8 +14,8 @@ poly1_resp = np.array([0, .01, .1, .1, .2, .5, 2, 5])
 pow_resp = np.array([0, .01, .1, .1, .2, .5, 2, 8])
 
 # Initialize and fit the model
-model = LogHillModel()
-model.fit(conc, hill_resp)
+model = PowerModel()
+model.fit(conc, pow_resp)
 
 if model.success_:
     # Output results
@@ -33,7 +33,7 @@ if model.success_:
 
     # Generate plot
     fig, ax = plt.subplots()
-    ax.scatter(conc, hill_resp, label='Observed', color='black')
+    ax.scatter(conc, pow_resp, label='Observed', color='black')
     ax.plot(conc_fine, pred, label='Fit', color='blue')
     # Add AC50 line
     ax.axvline(10 ** model.best_params_[1], linestyle='--', c='red')
