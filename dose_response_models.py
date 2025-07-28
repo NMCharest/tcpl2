@@ -180,6 +180,17 @@ class DoseResponseModel(ABC):
         """
         pass
 
+    @abstractmethod
+    def reparameterize(
+        self,
+        bmd: float,
+        bmr: float,
+        params: dict,
+        partype: int
+    ) -> dict:
+        pass
+        
+
 
 class LogHillModel(DoseResponseModel):
     """Hill model fitting function in log space.
@@ -226,7 +237,7 @@ class LogHillModel(DoseResponseModel):
 
         return DoseResponseModel.ParamGuess(guess=guess, bounds=bounds)
     
-    def invert(self, y: float, gain_side: bool = True) -> Optional[float]:
+    def invert(self, y: float, gain_side: bool = True) -> Optional[float]: #TODO add descending
         if not self.success_:
             return None
         tp, ga, p = self.best_params_[:-1]
@@ -237,4 +248,14 @@ class LogHillModel(DoseResponseModel):
             return 10 ** logc 
         except:
             return None
+        
+    def reparameterize(self, bmd: float, bmr: float, params: dict, partype: int) -> dict: #TODO double check algebra
+        tp, ga, p = params['tp'], params['ga'], params['p']
+        if partype == 0:
+            params['tp'] = bmr * (1 + (ga / bmd) ** p)
+        elif partype == 1:
+            params['ga'] = bmd * ((tp / bmr) -1 ) ** (1/p)
+        elif partype == 2:
+            params['p'] = np.log(tp / bmr - 1) / np.log(ga / bmd)
+        return params
 
