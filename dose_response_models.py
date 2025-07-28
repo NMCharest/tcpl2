@@ -6,7 +6,7 @@ Classes:
 """
 
 from abc import ABC, abstractmethod
-from typing import NamedTuple, NamedTuple, Optional
+from typing import NamedTuple, Callable, Optional
 
 import numpy as np
 import pandas as pd
@@ -195,7 +195,7 @@ class DoseResponseModel(ABC):
         
 
 
-class LogHillModel(DoseResponseModel):
+class LogHillModel(DoseResponseModel): #TODO requires invert and reparameterize
     """Hill model fitting function in log space.
     
     Parameters:
@@ -239,9 +239,31 @@ class LogHillModel(DoseResponseModel):
 
     def _model_fn(self, tx, *params):
         return params[0] / (1 + 10 ** (params[2] * (params[1] - tx)))
+    
+    def invert(self, y: float, gain_side: bool = True) -> Optional[float]: #TODO add descending
+        if not self.success_:
+            return None
+        tp, ga, p = self.best_params_[:-1]
+        if y <= 0 or y >= tp:
+            return None
+        try:
+            logc = ga - np.log10(tp / y - 1) / p
+            return 10 ** logc 
+        except:
+            return None
+        
+    def reparameterize(self, bmd: float, bmr: float, params: dict, partype: int) -> dict: #TODO double check algebra
+        tp, ga, p = params['tp'], params['ga'], params['p']
+        if partype == 0:
+            params['tp'] = bmr * (1 + (ga / bmd) ** p)
+        elif partype == 1:
+            params['ga'] = bmd * ((tp / bmr) -1 ) ** (1/p)
+        elif partype == 2:
+            params['p'] = np.log(tp / bmr - 1) / np.log(ga / bmd)
+        return params
 
 
-class Poly1Model(DoseResponseModel):
+class Poly1Model(DoseResponseModel): #TODO requires inversion
     """Degree-1 polynomial (linear) model fitting function.
     
     Parameters:
@@ -267,7 +289,7 @@ class Poly1Model(DoseResponseModel):
         return params[0] * tx
 
 
-class PowModel(DoseResponseModel):
+class PowModel(DoseResponseModel): #TODO requires invert and reparameterize
     """Power model fitting function.
     
     Parameters:
@@ -305,25 +327,5 @@ class PowModel(DoseResponseModel):
     def _model_fn(self, tx, *params):
         return params[0] * tx ** params[1]
     
-    def invert(self, y: float, gain_side: bool = True) -> Optional[float]: #TODO add descending
-        if not self.success_:
-            return None
-        tp, ga, p = self.best_params_[:-1]
-        if y <= 0 or y >= tp:
-            return None
-        try:
-            logc = ga - np.log10(tp / y - 1) / p
-            return 10 ** logc 
-        except:
-            return None
-        
-    def reparameterize(self, bmd: float, bmr: float, params: dict, partype: int) -> dict: #TODO double check algebra
-        tp, ga, p = params['tp'], params['ga'], params['p']
-        if partype == 0:
-            params['tp'] = bmr * (1 + (ga / bmd) ** p)
-        elif partype == 1:
-            params['ga'] = bmd * ((tp / bmr) -1 ) ** (1/p)
-        elif partype == 2:
-            params['p'] = np.log(tp / bmr - 1) / np.log(ga / bmd)
-        return params
+    
 
