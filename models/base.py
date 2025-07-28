@@ -1,32 +1,65 @@
-"""Library of classes representing various dose-response models.
+"""Base loss functions and dose-response model ABC.
 
-Classes:
-    DoseResponseModel: abstract base class for models
-    LogHillModel: Log Hill model ~ f(x) = tp / (1 + 10 ^ (p * (ga - x)))
+Loss functions have signature (obs, pred, err) -> loss and 
+are used in curve-fitting.
+
+The dose-response model ABC establishes an interface for dose-response
+model fitting and prediction.
 """
 
 from abc import ABC, abstractmethod
+from enum import Enum, member, nonmember
 from typing import Callable, NamedTuple
 
 import numpy as np
 import pandas as pd
 from numpy.typing import ArrayLike
 from scipy.optimize import minimize
-from scipy.stats import median_abs_deviation
+from scipy.stats import median_abs_deviation, norm, t
 
-from loss_functions import LossFunctions
+# Default error (1e-32 or 1e-16)
+DEFAULT_ERROR = 1e-32
+
+class LossFunctions(Enum):
+    """Callable enum of available loss functions."""
+
+    @nonmember
+    @staticmethod
+    def _base(o, p, e, pdf, **kwargs):
+        if not e or e <= 0:
+            e = DEFAULT_ERROR
+        return np.sum(pdf((o - p) /  e, **kwargs) - np.log(e))
+
+    @nonmember
+    @staticmethod
+    def _loss_fn(
+        pdf: Callable[..., ArrayLike],
+        **kwargs
+    ) -> Callable[[ArrayLike, ArrayLike, ArrayLike], float]:
+        """Generic log loss function using any input log PDF function."""
+        return lambda o, p, e: LossFunctions._base(o, p, e, pdf, **kwargs)
+
+    # t-distributed log error with 4 DoF
+    DT4 = member(staticmethod(_loss_fn(t.logpdf, df=4)))
+    # Normally distributed log error
+    DNORM = member(staticmethod(_loss_fn(norm.logpdf)))
+
+    def __call__(
+        self,
+        obs: ArrayLike,
+        pred: ArrayLike,
+        err: ArrayLike
+    ) -> float:
+        return self.value(obs, pred, err)
 
 # Default loss function (DT4 or DNORM)
 DEFAULT_LOSS_FN = LossFunctions.DT4
 # Default bidirectional fit
 DEFAULT_BID = True
-# Default error (1e-32 or 1e-16)
-DEFAULT_ERROR = 1e-32
 # Default error bounds
 DEFAULT_ERROR_BOUNDS = (-32, 32)
 # Default optimization solver
 DEFAULT_METHOD = 'Nelder-Mead'
-
 
 class DoseResponseModel(ABC):
     """Abstract base class defining dose-response model behavior."""
@@ -169,114 +202,3 @@ class DoseResponseModel(ABC):
             bid: bidirectional fit (default true)
         """
         return self.fit(x, y, loss_fn, bid).predict(x)
-
-
-class LogHillModel(DoseResponseModel):
-    """Hill model fitting function in log space.
-    
-    Parameters:
-        tp: theoretical maximal response (top)
-        ga: gain AC50
-        p: gain power
-    """
-
-    _name = 'loghill'
-    _is_log_fit = True
-
-    @staticmethod
-    def _tp_bounds_fn(tx, y, bid):
-        if bid:
-            tp_max = 1.2 * max([abs(min(y)), abs(max(y))])
-            tp_min = -tp_max
-        else:
-            tp_min = 0
-            tp_max = 1.2 * max(y)
-
-        return tp_min, tp_max
-
-    _model_params = [
-        DoseResponseModel._Param(
-            'tp',
-            lambda tx, y, bid: DoseResponseModel._meds(tx, y, bid).max(),
-            _tp_bounds_fn
-        ),
-        DoseResponseModel._Param(
-            'ga',
-            (lambda tx, y, bid:
-                DoseResponseModel._meds(tx, y, bid).idxmax() - 0.5),
-            lambda tx, y, bid: (min(tx) - 1, max(tx) + 0.5),
-        ),
-        DoseResponseModel._Param(
-            'p',
-            lambda tx, y, bid: 1.2,
-            lambda tx, y, bid: (0.3, 8)
-        )
-    ]
-
-    def _model_fn(self, tx, *params):
-        return params[0] / (1 + 10 ** (params[2] * (params[1] - tx)))
-
-
-class Poly1Model(DoseResponseModel):
-    """Degree-1 polynomial (linear) model fitting function.
-    
-    Parameters:
-        a: y-scale (slope)
-    """
-
-    _name = 'poly1'
-    _is_log_fit = False
-
-    @staticmethod
-    def _max_slope(tx, y, bid):
-        meds = DoseResponseModel._meds(tx, y, bid)
-        return meds.max() / max(tx)
-
-    @staticmethod
-    def _a_bounds_fn(tx, y, bid):
-        val = 1e8 * abs(Poly1Model._max_slope(tx, y, bid))
-        return (-val, val) if bid else (0, val)
-
-    _model_params = [DoseResponseModel._Param('a', _max_slope, _a_bounds_fn)]
-
-    def _model_fn(self, tx, *params):
-        return params[0] * tx
-
-
-class PowModel(DoseResponseModel):
-    """Power model fitting function.
-    
-    Parameters:
-        a: y-scale
-        p: power
-    """
-
-    _name = 'pow'
-    _is_log_fit = False
-
-    @staticmethod
-    def _max_slope(tx, y, bid):
-        meds = DoseResponseModel._meds(tx, y, bid)
-        return meds.max() / max(tx)
-
-    @staticmethod
-    def _a_bounds_fn(tx, y, bid):
-        meds_max_abs = abs(DoseResponseModel._meds(tx, y, bid).max())
-        val = 1e8 * meds_max_abs
-        return (-val, val) if bid else (1e-8 * meds_max_abs, val)
-
-    _model_params = [
-        DoseResponseModel._Param(
-            'a',
-            lambda tx, y, bid: DoseResponseModel._meds(tx, y, bid).max(),
-            _a_bounds_fn
-        ),
-        DoseResponseModel._Param(
-            'p',
-            lambda tx, y, bid: 1.5,
-            lambda tx, y, bid: (-20, 20)
-        )
-    ]
-
-    def _model_fn(self, tx, *params):
-        return params[0] * tx ** params[1]
